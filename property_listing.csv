@@ -1,0 +1,5 @@
+id,title,type,price,state,city,areaSqFt,bedrooms,bathrooms,amenities,furnished,availableFrom,listedBy,tags,colorTheme,rating,isVerified,listingType
+PROP1000,Green sea.,Bungalow,23825834,Tamil Nadu,Coimbatore,4102,5,2,"lift|clubhouse|security|gym|garden|pool",Unfurnished,2025-10-14,Builder,"gated-community|corner-plot",#6ab45e,4.7,true,rent
+PROP1001,Usually each keep team allow.,Villa,24733522,Karnataka,Mysore,732,5,1,"lift|power-backup|security|wifi|pool|clubhouse",Furnished,2025-09-06,Builder,"luxury|lake-view|affordable",#1361c4,1.3,false,sale
+PROP1002,Billion somebody research perform.,Apartment,17965682,West Bengal,Kolkata,3401,5,4,"garden|security|pool|power-backup|parking",Semi,2025-10-08,Owner,"corner-plot|family-friendly|near-metro",#b48903,4.3,false,sale
+PROP1003,Record another month table.,Villa,40380527,Karnataka,Mysore,1179,3,5,"power-backup|garden|clubhouse|gym",Unfurnished,2025-10-05,Owner,"corner-plot|near-metro",#6ca2d4,2.0,true,sale 
