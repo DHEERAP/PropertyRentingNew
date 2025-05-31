@@ -1,5 +1,29 @@
+🏡 Full-Featured Property Listing App – Backend
+A robust and scalable backend for a modern Property Listing platform that allows users to browse, post, and manage real estate listings for both rent and sale. Built with clean architecture and modern technologies to ensure fast performance, secure operations, and mobile responsiveness.
 
-A full-featured Property Listing app Backend code where users can browse, post, and manage property listings for rent or sale. Includes user authentication, image uploads, post management, and a clean UI. Built with modern web technologies to deliver a fast and responsive experience across devices.
+✨ Key Features:
+1. User Authentication & Authorization
+2. Secure registration, login, and session management
+3. Role-based access (e.g., admin, authenticated users)
+
+
+#### Property Listings 
+
+1. Users can create, update, delete, and manage their listings
+2. Listings include details like title, price, location, amenities, tags, images, and more
+3. Listings categorized by sale or rent
+4. Property Browsing
+5. Search and filter properties by location, price, type, and tags
+6. View detailed property pages with descriptions, ratings, and amenities
+
+
+### Favorites System 
+
+1. Every user can add any property to their favorites for quick access later
+2. View and manage your list of favorite properties
+3. Property Recommendations
+4. Authenticated users can recommend properties to other registered users
+5. Recommendations stored and visible in the recipient’s dashboard
 
 
 # Property Listing  Backend API
@@ -15,6 +39,7 @@ This repository contains the backend API for a property Resting application. It 
 *   TypeScript
 *   Multer (for file uploads)
 *   JWT (for authentication)
+*   render (fro deployement)
 
 ## Setup
 
@@ -63,34 +88,36 @@ The server will run on the port specified in your `.env` file (default is 5000).
 
 ## API Endpoints
 
-The API base URL is `http://localhost:5000/api`
+The API base URL is`http://localhost:5000/api`(local host)
+Deployed API testing URL is `https://property-renting-backend.onrender.com/`(Production)
 
 Authentication is required for most endpoints. Include a Bearer token in the `Authorization` header: `Authorization: Bearer [your_token]`.
 
+
+#### Postmen checking EndPoints---
+
 ### Authentication
 
-*   `POST /api/auth/register` - Register a new user.
-*   `POST /api/auth/login` - Log in and get a JWT token.
+*   `POST https://property-renting-backend.onrender.com/api/auth/register` - Register a new user.
+*   `POST https://property-renting-backend.onrender.com/api/auth/login` - Log in and get a JWT token.
 
 ### Properties
 
-*   `POST /api/properties` - Create a new property (requires authentication).
-*   `GET /api/properties` - Get all properties (supports filtering, sorting, pagination).
-*   `GET /api/properties/:id` - Get a property by ID.
-*   `PUT /api/properties/:id` - Update a property by ID (requires authentication).
-*   `DELETE /api/properties/:id` - Delete a property by ID (requires authentication).
+*   `POST https://property-renting-backend.onrender.com/api/properties` - Create a new property (requires authentication).
+*   `GET https://property-renting-backend.onrender.com/api/properties` - Get all properties (supports filtering, sorting, pagination).
+*   `GET https://property-renting-backend.onrender.com/api/properties/:id` - Get a property by ID.
+*   `PUT https://property-renting-backend.onrender.com/api/properties/:id` - Update a property by ID (requires authentication).
+*   `DELETE https://property-renting-backend.onrender.com/api/properties/:id` - Delete a property by ID (requires authentication).
 
 ### CSV Import
-
-*   `POST /api/import` - Import properties from a CSV file (requires authentication). Send as `multipart/form-data` with the key `file`.
-*   `GET /api/import/template` - Get a sample CSV template.
+*    Import through MongoDB Compass
 
 ### Favorites
 
-*   `POST /api/favorites/:propertyId` - Add a property to favorites (requires authentication).
-*   `DELETE /api/favorites/:propertyId` - Remove a property from favorites (requires authentication).
-*   `GET /api/favorites` - Get user's favorite properties (requires authentication).
+*   `POST https://property-renting-backend.onrender.com/api/favorites/:propertyId` - Add a property to favorites (requires authentication).
+*   `DELETE https://property-renting-backend.onrender.com/api/favorites/:propertyId` - Remove a property from favorites (requires authentication).
+*   `GET https://property-renting-backend.onrender.com/api/favorites` - Get user's favorite properties (requires authentication).
 
 ### Recommendations
 
-*   `GET /api/recommendations` - Get property recommendations (requires authentication, specific logic depends on implementation).
+*   `GET https://property-renting-backend.onrender.com/api/recommendations` - Get property recommendations (requires authentication, specific logic depends on implementation).
