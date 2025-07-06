@@ -103,10 +103,21 @@ const propertySchema = new Schema<IProperty>({
   timestamps: true
 });
 
+// Add comprehensive indexes for search optimization
+propertySchema.index({ title: 1 }); // Index for title searches
+propertySchema.index({ state: 1 }); // Index for state searches  
+propertySchema.index({ city: 1 }); // Index for city searches
+propertySchema.index({ title: 'text', state: 'text', city: 'text' }); // Text index for full-text search
+propertySchema.index({ city: 1, state: 1, type: 1, listingType: 1, price: 1 });
+propertySchema.index({ amenities: 1 });
+propertySchema.index({ tags: 1 });
+propertySchema.index({ price: 1 }); // Index for price filtering
+propertySchema.index({ bedrooms: 1 }); // Index for bedroom filtering
+propertySchema.index({ bathrooms: 1 }); // Index for bathroom filtering
+propertySchema.index({ areaSqFt: 1 }); // Index for area filtering
+propertySchema.index({ type: 1 }); // Index for property type filtering
+propertySchema.index({ listingType: 1 }); // Index for listing type filtering
+propertySchema.index({ createdBy: 1 }); // Index for user's properties
+propertySchema.index({ createdAt: -1 }); // Index for sorting by creation date
 
-
-  propertySchema.index({ city: 1, state: 1, type: 1, listingType: 1, price: 1 });
-  propertySchema.index({ amenities: 1 });
-  propertySchema.index({ tags: 1 });
-
-  export default mongoose.model<IProperty>('Property', propertySchema);
+export default mongoose.model<IProperty>('Property', propertySchema);

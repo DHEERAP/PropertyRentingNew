@@ -14,4 +14,11 @@ redisClient.on('error', (err) => console.error('Redis Client Error', err));
 export const connectRedis = async () => {
   await redisClient.connect();
   console.log('Connected to Redis');
-};  
+};
+
+export async function deleteKeysByPattern(pattern: string) {
+  const keys = await redisClient.keys(pattern);
+  if (keys.length > 0) {
+    await redisClient.del(keys);
+  }
+}  

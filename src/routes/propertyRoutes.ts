@@ -6,7 +6,9 @@
     getProperties,
     getPropertyById,
     updateProperty,
-    deleteProperty
+    deleteProperty,
+    getMyProperties,
+    aiPropertyEvaluation
   } from '../controllers/propertyController';
   import { authMiddleware } from '../middlewares/authMiddleware';
 
@@ -20,6 +22,8 @@
   router.get('/:id', getPropertyById);
   router.put('/:id', authMiddleware, updateProperty);
   router.delete('/:id', authMiddleware, deleteProperty);
+  router.get('/mine', authMiddleware, getMyProperties);
+  router.post('/ai-evaluate', aiPropertyEvaluation);
 
   // Export the router
   export default router;

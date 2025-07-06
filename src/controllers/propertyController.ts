@@ -1,12 +1,20 @@
 import { Request, Response } from 'express';
-import Property from '../models/Property';
-import { redisClient } from '../utils/redisClient';
+import Property, { IProperty } from '../models/Property';
+import { redisClient, deleteKeysByPattern } from '../utils/redisClient';
 import csvtojson from 'csvtojson';
 import mongoose from 'mongoose';
 import fs from 'fs';
 import path from 'path';
+import { evaluatePropertyWithGemini } from '../utils/geminiAI';
 
 const CACHE_EXPIRATION = 3600; // 1 hour in seconds
+
+// Add this at the top of the file (after imports)
+function safeString(val: unknown): string {
+  if (typeof val === 'string') return val;
+  if (typeof val === 'number') return String(val);
+  return '';
+}
 
 // CSV Import Function
 export const importProperties = async (req: Request, res: Response) => {
@@ -87,7 +95,7 @@ export const importProperties = async (req: Request, res: Response) => {
       }))
     );
 
-    await redisClient.del('properties:all');
+    await deleteKeysByPattern('properties:*');
 
     res.status(201).json({
       message: 'Properties imported successfully',
@@ -138,10 +146,14 @@ export const createProperty = async (req: Request, res: Response) => {
 
     await property.save();
 
-    await redisClient.del('properties:all');
+    await deleteKeysByPattern('properties:*');
+    await deleteKeysByPattern('property:*');
     res.status(201).json(property);
-  } catch (error) {
+  } catch (error: any) {
     console.error(error);
+    if (error.code === 11000 && error.keyPattern && error.keyPattern.id) {
+      return res.status(400).json({ message: `A property with ID '${error.keyValue.id}' already exists. Please use a unique Property ID.` });
+    }
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -155,11 +167,19 @@ export const getProperties = async (req: Request, res: Response) => {
       search, sortBy, sortOrder = 'asc', page = 1, limit = 10
     } = req.query;
 
-    const cacheKey = `properties:${JSON.stringify(req.query)}`;
+    // Create a more efficient cache key by sorting query parameters
+    const sortedQuery = Object.keys(req.query)
+      .sort()
+      .reduce((result: Record<string, any>, key) => {
+        result[key] = req.query[key];
+        return result;
+      }, {});
+    
+    const cacheKey = `properties:${JSON.stringify(sortedQuery)}`;
     const cachedData = await redisClient.get(cacheKey);
     if (cachedData) return res.json(JSON.parse(cachedData));
 
-    const query: any = {};
+    const query: Record<string, any> = {};
     if (location) query.location = { $regex: location, $options: 'i' };
     if (minPrice || maxPrice) {
       query.price = {};
@@ -179,19 +199,40 @@ export const getProperties = async (req: Request, res: Response) => {
       query.amenities = { $all: (amenities as string).split(',') };
     }
     if (search) {
-      query.$or = [
-        { title: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } },
-        { location: { $regex: search, $options: 'i' } },
-      ];
+      // Convert search to string and handle type safety
+      const searchString = Array.isArray(search) ? search[0] : search as string;
+      if (searchString && typeof searchString === 'string') {
+        const searchTerms = searchString.trim().split(/\s+/).filter((term: string) => term.length > 0);
+        // All terms must be present in at least one of the fields
+        query.$and = searchTerms.map((term: string) => ({
+          $or: [
+            { title: { $regex: term, $options: 'i' } },
+            { state: { $regex: term, $options: 'i' } },
+            { city: { $regex: term, $options: 'i' } },
+          ]
+        }));
+      }
+    }
+    if (req.query.createdBy) {
+      try {
+        const objId = new mongoose.Types.ObjectId(req.query.createdBy as string);
+        query.$or = [
+          { createdBy: objId },
+          { createdBy: req.query.createdBy }
+        ];
+      } catch {
+        query.createdBy = req.query.createdBy;
+      }
     }
 
     const [properties, total] = await Promise.all([
       Property.find(query)
+        .select('id title type price state city areaSqFt bedrooms bathrooms amenities furnished availableFrom listedBy tags colorTheme rating isVerified listingType imageUrl createdAt')
         .sort(sortBy ? { [sortBy as string]: sortOrder === 'asc' ? 1 : -1 } : {})
         .skip((Number(page) - 1) * Number(limit))
         .limit(Number(limit))
-        .populate('createdBy', 'name email'),
+        .populate('createdBy', 'name email')
+        .lean(), // Use lean() for better performance when you don't need Mongoose document methods
       Property.countDocuments(query),
     ]);
 
@@ -218,7 +259,9 @@ export const getPropertyById = async (req: Request, res: Response) => {
     const cachedData = await redisClient.get(cacheKey);
     if (cachedData) return res.json(JSON.parse(cachedData));
 
-    const property = await Property.findById(id).populate('createdBy', 'name email');
+    const property = await Property.findById(id)
+      .populate('createdBy', 'name email')
+      .lean();
     if (!property) return res.status(404).json({ message: 'Property not found' });
 
     await redisClient.setEx(cacheKey, CACHE_EXPIRATION, JSON.stringify(property));
@@ -232,11 +275,11 @@ export const getPropertyById = async (req: Request, res: Response) => {
 // Update Property
 export const updateProperty = async (req: Request, res: Response) => {
   try {
-    const { id } = req.params;
+    const { id } = req.params; // property._id
     const userId = (req as any).userId;
 
-    // const property = await Property.findById(id);
-    const property = await Property.findOne({ id }).populate('createdBy', 'name email');
+    // Find property by _id
+    const property = await Property.findById(id);
     if (!property) return res.status(404).json({ message: 'Property not found' });
     if (property.createdBy.toString() !== userId.toString()) {
       return res.status(403).json({ message: 'Not authorized to update this property' });
@@ -248,10 +291,8 @@ export const updateProperty = async (req: Request, res: Response) => {
       { new: true }
     );
 
-    await Promise.all([
-      redisClient.del(`property:${id}`),
-      redisClient.del('properties:all'),
-    ]);
+    await deleteKeysByPattern('properties:*');
+    await deleteKeysByPattern('property:*');
     res.json(updatedProperty);
   } catch (error) {
     console.error(error);
@@ -262,9 +303,10 @@ export const updateProperty = async (req: Request, res: Response) => {
 // Delete Property
 export const deleteProperty = async (req: Request, res: Response) => {
   try {
-    const { id } = req.params;
+    const { id } = req.params; // property._id
     const userId = (req as any).userId;
 
+    // Find property by _id
     const property = await Property.findById(id);
     if (!property) return res.status(404).json({ message: 'Property not found' });
     if (property.createdBy.toString() !== userId.toString()) {
@@ -272,10 +314,8 @@ export const deleteProperty = async (req: Request, res: Response) => {
     }
 
     await Property.findByIdAndDelete(id);
-    await Promise.all([
-      redisClient.del(`property:${id}`),
-      redisClient.del('properties:all'),
-    ]);
+    await deleteKeysByPattern('properties:*');
+    await deleteKeysByPattern('property:*');
     res.json({ message: 'Property deleted successfully' });
   } catch (error) {
     console.error(error);
@@ -377,7 +417,7 @@ export const importPropertiesFromFile = async (filePath: string, userId: string)
       }))
     );
 
-    await redisClient.del('properties:all');
+    await deleteKeysByPattern('properties:*');
 
     return {
       message: 'Properties imported successfully',
@@ -405,6 +445,152 @@ export const importPropertiesDirect = async (req: Request, res: Response) => {
       message: 'Failed to import properties', 
       error: errorMessage 
     });
+  }
+};
+
+export const getMyProperties = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).userId;
+    if (!userId) return res.status(401).json({ message: 'Not authorized' });
+    const properties = await Property.find({ createdBy: userId }).populate('createdBy', 'name email');
+    res.json({ properties });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+export const aiPropertyEvaluation = async (req: any, res: any) => {
+  try {
+    const { price, areaSqFt, city, state, type, bedrooms, bathrooms, amenities, description } = req.body;
+    const cityStr = safeString(city);
+    // Get market data for comparison
+    const marketData = await Property.aggregate([
+      {
+        $match: {
+          $and: [
+            { city: { $regex: new RegExp(cityStr, 'i') } },
+            { type: type },
+            { price: { $exists: true, $ne: null } },
+            { areaSqFt: { $exists: true, $ne: null } }
+          ]
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          avgPrice: { $avg: "$price" },
+          avgPricePerSqFt: { $avg: { $divide: ["$price", "$areaSqFt"] } },
+          minPrice: { $min: "$price" },
+          maxPrice: { $max: "$price" },
+          count: { $sum: 1 },
+          avgBedrooms: { $avg: "$bedrooms" },
+          avgBathrooms: { $avg: "$bathrooms" },
+          avgArea: { $avg: "$areaSqFt" }
+        }
+      }
+    ]);
+
+    // Get amenities analysis
+    const amenitiesAnalysis = await Property.aggregate([
+      {
+        $match: {
+          $and: [
+            { city: { $regex: new RegExp(cityStr, 'i') } },
+            { type: type },
+            { amenities: { $exists: true, $ne: [] } }
+          ]
+        }
+      },
+      {
+        $unwind: "$amenities"
+      },
+      {
+        $group: {
+          _id: "$amenities",
+          count: { $sum: 1 },
+          avgPrice: { $avg: "$price" }
+        }
+      },
+      {
+        $sort: { count: -1 }
+      },
+      {
+        $limit: 10
+      }
+    ]);
+
+    // Get recent market trends
+    const recentProperties = await Property.find({
+      city: { $regex: new RegExp(cityStr, 'i') },
+      type: type,
+      createdAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } // Last 30 days
+    })
+    .sort({ createdAt: -1 })
+    .limit(5)
+    .select('price areaSqFt bedrooms bathrooms amenities rating isVerified listingType');
+
+    const marketInfo = marketData[0] || {};
+    const pricePerSqFt = areaSqFt ? price / areaSqFt : 0;
+    const marketPricePerSqFt = marketInfo.avgPricePerSqFt || 0;
+    // const priceComparison = marketPricePerSqFt > 0 ? ((pricePerSqFt - marketPricePerSqFt) / marketPricePerSqFt * 100).toFixed(1) : 0;
+   // Build comprehensive prompt for Gemini
+    // const prompt = `You are a real estate market analyst with access to comprehensive property data. Analyze the following property for investment potential and provide detailed market insights.\n\nPROPERTY DETAILS:\n- Price: ₹${price?.toLocaleString()}\n- Area: ${areaSqFt} sq.ft.\n- Price per sq.ft: ₹${pricePerSqFt?.toFixed(2)}\n- Location: ${cityStr}, ${state}\n- Type: ${type}\n- Bedrooms: ${bedrooms}\n- Bathrooms: ${bathrooms}\n- Amenities: ${Array.isArray(amenities) ? amenities.join(", ") : amenities}\n- Description: ${description || "N/A"}\n\nMARKET ANALYSIS DATA:\n- Average price in ${cityStr} for ${type}: ₹${marketInfo.avgPrice?.toLocaleString() || 'N/A'}\n- Average price per sq.ft in ${cityStr} for ${type}: ₹${marketInfo.avgPricePerSqFt?.toFixed(2) || 'N/A'}\n- Price comparison: ${priceComparison}% ${parseFloat() > 0 ? 'above' : 'below'} market average\n- Market range: ₹${marketInfo.minPrice?.toLocaleString() || 'N/A'} - ₹${marketInfo.maxPrice?.toLocaleString() || 'N/A'}\n- Total similar properties in market: ${marketInfo.count || 0}\n- Average bedrooms in market: ${marketInfo.avgBedrooms?.toFixed(1) || 'N/A'}\n- Average bathrooms in market: ${marketInfo.avgBathrooms?.toFixed(1) || 'N/A'}\n\nTOP AMENITIES IN ${cityStr} ${type} MARKET:\n${amenitiesAnalysis.map((item, index) => `${index + 1}. ${item._id}: ${item.count} properties (avg price: ₹${item.avgPrice?.toLocaleString()})`).join('\\n')}\n\nRECENT MARKET ACTIVITY (Last 30 days):\n${recentProperties.map((prop, index) => `${index + 1}. ₹${prop.price?.toLocaleString()} | ${prop.areaSqFt} sq.ft | ${prop.bedrooms}B/${prop.bathrooms}B | Rating: ${prop.rating} | ${prop.isVerified ? 'Verified' : 'Unverified'}`).join('\\n')}\n\nANALYSIS REQUIREMENTS:\n1. **Price Analysis**: Compare the property price with market averages and recent sales\n2. **Amenities Value**: Evaluate the property's amenities against market preferences\n3. **Location Assessment**: Consider the location's desirability and growth potential\n4. **Investment Potential**: Assess rental yield potential and appreciation prospects\n5. **Risk Factors**: Identify any potential risks or concerns\n6. **Recommendation**: Provide a clear BUY/HOLD/AVOID recommendation with reasoning\n7. **Market Trends**: Comment on current market conditions in ${cityStr}\n8. **Amenities Impact**: How do the property's amenities compare to market standards?\n\nProvide a comprehensive analysis in a structured format with clear sections for each aspect. Be specific about numbers and market data.`;
+
+
+
+
+const priceComparison =
+  marketPricePerSqFt > 0
+    ? ((pricePerSqFt - marketPricePerSqFt) / marketPricePerSqFt * 100).toFixed(1)
+    : '0';
+
+const priceComparisonText = parseFloat(priceComparison) > 0 ? 'above' : 'below';
+
+const prompt = `You are a real estate market analyst with access to comprehensive property data. Analyze the following property for investment potential and provide detailed market insights.
+
+PROPERTY DETAILS:
+- Price: ₹${price?.toLocaleString()}
+- Area: ${areaSqFt} sq.ft.
+- Price per sq.ft: ₹${pricePerSqFt?.toFixed(2)}
+- Location: ${cityStr}, ${state}
+- Type: ${type}
+- Bedrooms: ${bedrooms}
+- Bathrooms: ${bathrooms}
+- Amenities: ${Array.isArray(amenities) ? amenities.join(", ") : amenities}
+- Description: ${description || "N/A"}
+
+MARKET ANALYSIS DATA:
+- Average price in ${cityStr} for ${type}: ₹${marketInfo.avgPrice?.toLocaleString() || 'N/A'}
+- Average price per sq.ft in ${cityStr} for ${type}: ₹${marketInfo.avgPricePerSqFt?.toFixed(2) || 'N/A'}
+- Price comparison: ${priceComparison}% ${priceComparisonText} market average
+- Market range: ₹${marketInfo.minPrice?.toLocaleString() || 'N/A'} - ₹${marketInfo.maxPrice?.toLocaleString() || 'N/A'}
+- Total similar properties in market: ${marketInfo.count || 0}
+- Average bedrooms in market: ${marketInfo.avgBedrooms?.toFixed(1) || 'N/A'}
+- Average bathrooms in market: ${marketInfo.avgBathrooms?.toFixed(1) || 'N/A'}
+
+TOP AMENITIES IN ${cityStr} ${type} MARKET:
+${amenitiesAnalysis.map((item, index) => `${index + 1}. ${item._id}: ${item.count} properties (avg price: ₹${item.avgPrice?.toLocaleString()})`).join('\n')}
+
+RECENT MARKET ACTIVITY (Last 30 days):
+${recentProperties.map((prop, index) => `${index + 1}. ₹${prop.price?.toLocaleString()} | ${prop.areaSqFt} sq.ft | ${prop.bedrooms}B/${prop.bathrooms}B | Rating: ${prop.rating} | ${prop.isVerified ? 'Verified' : 'Unverified'}`).join('\n')}
+
+ANALYSIS REQUIREMENTS:
+1. **Price Analysis**: Compare the property price with market averages and recent sales
+2. **Amenities Value**: Evaluate the property's amenities against market preferences
+3. **Location Assessment**: Consider the location's desirability and growth potential
+4. **Investment Potential**: Assess rental yield potential and appreciation prospects
+5. **Risk Factors**: Identify any potential risks or concerns
+6. **Recommendation**: Provide a clear BUY/HOLD/AVOID recommendation with reasoning
+7. **Market Trends**: Comment on current market conditions in ${cityStr}
+8. **Amenities Impact**: How do the property's amenities compare to market standards?
+
+Provide a comprehensive analysis in a structured format with clear sections for each aspect. Be specific about numbers and market data.`;
+    const aiResponse = await evaluatePropertyWithGemini(prompt);
+    res.status(200).json({ success: true, result: aiResponse });
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    res.status(500).json({ success: false, message: 'AI evaluation failed', error: errMsg });
   }
 };
 

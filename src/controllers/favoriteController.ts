@@ -90,3 +90,12 @@ export const getUserFavorites = async (req: Request, res: Response) => {
     res.status(500).json({ message: 'Server error' });
   }
 };
+
+
+
+
+
+
+
+
+// https://www.loom.com/share/aa6751f479ca46afa0e1f1ecf9774f0e
