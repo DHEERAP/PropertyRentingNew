@@ -16,7 +16,7 @@
 
   // Middlewares
   app.use(cors({
-    origin: 'https://property-renting-new.vercel.app',
+    origin: "https://property-renting-new.vercel.app",
     credentials: true
   }));
   app.use(express.json());
