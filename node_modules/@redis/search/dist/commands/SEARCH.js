@@ -8,13 +8,13 @@ function transformArguments(index, query, options) {
     return (0, _1.pushSearchOptions)(['FT.SEARCH', index, query], options);
 }
 exports.transformArguments = transformArguments;
-function transformReply(reply) {
+function transformReply(reply, withoutDocuments) {
     const documents = [];
     let i = 1;
     while (i < reply.length) {
         documents.push({
             id: reply[i++],
-            value: documentValue(reply[i++])
+            value: withoutDocuments ? Object.create(null) : documentValue(reply[i++])
         });
     }
     return {
@@ -25,8 +25,6 @@ function transformReply(reply) {
 exports.transformReply = transformReply;
 function documentValue(tuples) {
     const message = Object.create(null);
-    if (tuples === undefined)
-        return message;
     let i = 0;
     while (i < tuples.length) {
         const key = tuples[i++], value = tuples[i++];
