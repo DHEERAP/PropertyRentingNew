@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: property-lending-backend
+    env: node
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    rootDir: .
+    ignoreFiles:
+      - frontend/
+      - frontend/**/*
+    envVars:
+      - key: NODE_ENV
+        value: production 
